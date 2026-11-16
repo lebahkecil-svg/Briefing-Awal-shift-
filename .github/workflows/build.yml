@@ -1,9 +1,9 @@
 name: Build APK
 
 on:
+  workflow_dispatch:
   push:
     branches: [ main, master ]
-  workflow_dispatch:
 
 permissions:
   contents: write
@@ -15,46 +15,44 @@ jobs:
       - name: Ambil kode
         uses: actions/checkout@v4
 
-      - name: Siapkan JDK 17
+      - name: Ekstrak ZIP proyek (jika diunggah berupa ZIP)
+        run: |
+          if ls ./*.zip >/dev/null 2>&1; then
+            rm -rf proyek
+            mkdir proyek
+            for z in ./*.zip; do unzip -q -o "$z" -d proyek; done
+          fi
+          S=$(find . -name settings.gradle -not -path './.git/*' | head -n 1)
+          if [ -z "$S" ]; then echo "settings.gradle tidak ditemukan"; exit 1; fi
+          echo "PROJECT_DIR=$(dirname "$S")" >> "$GITHUB_ENV"
+
+      - name: Pasang JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Siapkan Gradle 8.9
+      - name: Pasang Gradle 8.7
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.9'
+          gradle-version: '8.7'
 
-      - name: Siapkan folder project
-        run: |
-          ZIP=$(ls *.zip 2>/dev/null | head -1 || true)
-          if [ -n "$ZIP" ]; then
-            echo "Memakai $ZIP"
-            mkdir -p _proj
-            unzip -q -o "$ZIP" -d _proj
-            DIR=$(dirname "$(find _proj -name settings.gradle.kts | head -1)")
-            echo "PROJ=$DIR" >> "$GITHUB_ENV"
-          else
-            echo "PROJ=." >> "$GITHUB_ENV"
-          fi
+      - name: Terima lisensi Android SDK
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
 
-      - name: Build APK
-        working-directory: ${{ env.PROJ }}
+      - name: Build APK debug
+        working-directory: ${{ env.PROJECT_DIR }}
         run: gradle assembleDebug --no-daemon --stacktrace
 
-      - name: Ambil APK
-        run: cp "${{ env.PROJ }}/app/build/outputs/apk/debug/app-debug.apk" BriefingShift.apk
-
-      - name: Simpan APK sebagai artifact
+      - name: Unggah APK sebagai artifact
         uses: actions/upload-artifact@v4
         with:
-          name: BriefingShift-apk
-          path: BriefingShift.apk
+          name: BriefingShift-APK
+          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/*.apk
 
-      - name: Terbitkan ke Releases (download langsung dari Chrome)
+      - name: Buat Release agar mudah diunduh dari Chrome
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
           name: Briefing Shift build ${{ github.run_number }}
-          files: BriefingShift.apk
+          files: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/*.apk
